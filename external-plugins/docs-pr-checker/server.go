@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"strconv"
+	"sigs.k8s.io/prow/pkg/config"
+	"sigs.k8s.io/prow/pkg/pluginhelp"
 	"strings"
 
 	"github.com/sirupsen/logrus"
-	"sigs.k8s.io/prow/pkg/config/secret"
 	"sigs.k8s.io/prow/pkg/github"
-	"sigs.k8s.io/prow/pkg/pluginhelp/externalplugins"
 )
 
 const pluginName = "docs-pr-checker"
@@ -19,7 +18,7 @@ const pluginName = "docs-pr-checker"
 var (
 	// Matches a docs-pr code block, capturing everything between the opening and closing triple backticks.
 	// Handles optional whitespace/newlines and any content inside.
-	docsPRRegex = regexp.MustCompile(`(?is)```docs-pr\s*\n(.*?)\n?```)`)
+	docsPRRegex = regexp.MustCompile(fmt.Sprintf(`(?is)%sdocs-pr\s*\n(.*?)\n?%s`, "```", "```"))
 )
 
 const (
@@ -29,11 +28,11 @@ const (
 )
 
 // HelpProvider constructs the PluginHelp for this plugin.
-func HelpProvider(config []byte) (*externalplugins.PluginHelp, error) {
-	pluginHelp := &externalplugins.PluginHelp{
+func HelpProvider(_ []config.OrgRepo) (*pluginhelp.PluginHelp, error) {
+	pluginHelp := &pluginhelp.PluginHelp{
 		Description: "The docs-pr-checker plugin ensures that PRs include documentation updates when required.",
 	}
-	pluginHelp.AddCommand(externalplugins.PluginCommand{
+	pluginHelp.AddCommand(pluginhelp.Command{
 		Usage:       "/docs-pr <PR-number|NONE>",
 		Description: "Updates the docs-pr status of a pull request.",
 		Featured:    false,
@@ -142,24 +141,21 @@ func (s *Server) processDocsPRCommand(l *logrus.Entry, org, repo string, pr *git
 	}
 
 	docsPRValue := strings.Join(parts[1:], " ")
-	
+
 	// Update PR body with the new docs-pr value
 	newBody := s.updateDocsPRInBody(pr.Body, docsPRValue)
-	
+
 	// Update the PR description
 	update := github.PullRequest{
-		Body: &newBody,
+		Body: newBody,
 	}
-	
-	if err := s.ghc.EditPullRequest(org, repo, pr.Number, &update); err != nil {
+
+	updatedPR, err := s.ghc.EditPullRequest(org, repo, pr.Number, &update)
+	if err != nil {
 		return fmt.Errorf("failed to update PR body: %w", err)
 	}
 
-	// Update the labels based on the new value
-	updatedPR := *pr
-	updatedPR.Body = newBody
-	
-	return s.checkAndUpdateDocsPRStatus(l, org, repo, &updatedPR)
+	return s.checkAndUpdateDocsPRStatus(l, org, repo, updatedPR)
 }
 
 func (s *Server) updateDocsPRInBody(body, newValue string) string {
@@ -216,5 +212,3 @@ func (s *Server) checkAndUpdateDocsPRStatus(l *logrus.Entry, org, repo string, p
 	}
 	return nil
 }
-
-
